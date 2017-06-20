@@ -813,7 +813,7 @@ export default function addLocaleChinese(locales) {
             "ko_KR" : "韩语",
             "zh_CN" : "汉语",
             "ru_RU" : "俄语",
-            "es_ES": "西班牙語"
+            "es_ES": "西班牙语"
         }
     };
     angular.extend(locales, {
