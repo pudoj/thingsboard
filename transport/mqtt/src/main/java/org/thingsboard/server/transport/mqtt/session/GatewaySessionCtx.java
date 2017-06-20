@@ -78,10 +78,12 @@ public class GatewaySessionCtx {
                 Device newDevice = new Device();
                 newDevice.setTenantId(gateway.getTenantId());
                 newDevice.setName(deviceName);
+                newDevice.setType("default");
                 return deviceService.saveDevice(newDevice);
             });
             GatewayDeviceSessionCtx ctx = new GatewayDeviceSessionCtx(this, device);
             devices.put(deviceName, ctx);
+            log.debug("[{}] Added device [{}] to the gateway session", gatewaySessionId, deviceName);
             processor.process(new BasicToDeviceActorSessionMsg(device, new BasicAdaptorToSessionActorMsg(ctx, new AttributesSubscribeMsg())));
             processor.process(new BasicToDeviceActorSessionMsg(device, new BasicAdaptorToSessionActorMsg(ctx, new RpcSubscribeMsg())));
         }
@@ -94,6 +96,9 @@ public class GatewaySessionCtx {
         if (deviceSessionCtx != null) {
             processor.process(SessionCloseMsg.onDisconnect(deviceSessionCtx.getSessionId()));
             deviceSessionCtx.setClosed(true);
+            log.debug("[{}] Removed device [{}] from the gateway session", gatewaySessionId, deviceName);
+        } else {
+            log.debug("[{}] Device [{}] was already removed from the gateway session", gatewaySessionId, deviceName);
         }
         ack(msg);
     }
@@ -191,7 +196,8 @@ public class GatewaySessionCtx {
 
     private String checkDeviceConnected(String deviceName) {
         if (!devices.containsKey(deviceName)) {
-            throw new RuntimeException("Device is not connected!");
+            log.debug("[{}] Missing device [{}] for the gateway session", gatewaySessionId, deviceName);
+            throw new RuntimeException("Device " + deviceName + " is not connected!");
         } else {
             return deviceName;
         }

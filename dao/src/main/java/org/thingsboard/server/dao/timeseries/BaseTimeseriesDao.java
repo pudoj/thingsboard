@@ -26,10 +26,10 @@ import com.google.common.util.concurrent.ListenableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.kv.*;
 import org.thingsboard.server.common.data.kv.DataType;
 import org.thingsboard.server.dao.AbstractAsyncDao;
-import org.thingsboard.server.dao.AbstractDao;
 import org.thingsboard.server.dao.model.ModelConstants;
 
 import javax.annotation.Nullable;
@@ -39,8 +39,6 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static com.datastax.driver.core.querybuilder.QueryBuilder.eq;
@@ -63,8 +61,10 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
     private TsPartitionDate tsFormat;
 
     private PreparedStatement partitionInsertStmt;
+    private PreparedStatement partitionInsertTtlStmt;
     private PreparedStatement[] latestInsertStmts;
     private PreparedStatement[] saveStmts;
+    private PreparedStatement[] saveTtlStmts;
     private PreparedStatement[] fetchStmts;
     private PreparedStatement findLatestStmt;
     private PreparedStatement findAllLatestStmt;
@@ -94,8 +94,8 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
     }
 
     @Override
-    public ListenableFuture<List<TsKvEntry>> findAllAsync(String entityType, UUID entityId, List<TsKvQuery> queries) {
-        List<ListenableFuture<List<TsKvEntry>>> futures = queries.stream().map(query -> findAllAsync(entityType, entityId, query)).collect(Collectors.toList());
+    public ListenableFuture<List<TsKvEntry>> findAllAsync(EntityId entityId, List<TsKvQuery> queries) {
+        List<ListenableFuture<List<TsKvEntry>>> futures = queries.stream().map(query -> findAllAsync(entityId, query)).collect(Collectors.toList());
         return Futures.transform(Futures.allAsList(futures), new Function<List<List<TsKvEntry>>, List<TsKvEntry>>() {
             @Nullable
             @Override
@@ -108,9 +108,9 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
     }
 
 
-    private ListenableFuture<List<TsKvEntry>> findAllAsync(String entityType, UUID entityId, TsKvQuery query) {
+    private ListenableFuture<List<TsKvEntry>> findAllAsync(EntityId entityId, TsKvQuery query) {
         if (query.getAggregation() == Aggregation.NONE) {
-            return findAllAsyncWithLimit(entityType, entityId, query);
+            return findAllAsyncWithLimit(entityId, query);
         } else {
             long step = Math.max(query.getInterval(), minAggregationStepMs);
             long stepTs = query.getStartTs();
@@ -119,7 +119,7 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
                 long startTs = stepTs;
                 long endTs = stepTs + step;
                 TsKvQuery subQuery = new BaseTsKvQuery(query.getKey(), startTs, endTs, step, 1, query.getAggregation());
-                futures.add(findAndAggregateAsync(entityType, entityId, subQuery, toPartitionTs(startTs), toPartitionTs(endTs)));
+                futures.add(findAndAggregateAsync(entityId, subQuery, toPartitionTs(startTs), toPartitionTs(endTs)));
                 stepTs = endTs;
             }
             ListenableFuture<List<Optional<TsKvEntry>>> future = Futures.allAsList(futures);
@@ -133,11 +133,11 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
         }
     }
 
-    private ListenableFuture<List<TsKvEntry>> findAllAsyncWithLimit(String entityType, UUID entityId, TsKvQuery query) {
+    private ListenableFuture<List<TsKvEntry>> findAllAsyncWithLimit(EntityId entityId, TsKvQuery query) {
         long minPartition = toPartitionTs(query.getStartTs());
         long maxPartition = toPartitionTs(query.getEndTs());
 
-        ResultSetFuture partitionsFuture = fetchPartitions(entityType, entityId, query.getKey(), minPartition, maxPartition);
+        ResultSetFuture partitionsFuture = fetchPartitions(entityId, query.getKey(), minPartition, maxPartition);
 
         final SimpleListenableFuture<List<TsKvEntry>> resultFuture = new SimpleListenableFuture<>();
         final ListenableFuture<List<Long>> partitionsListFuture = Futures.transform(partitionsFuture, getPartitionsArrayFunction(), readResultsProcessingExecutor);
@@ -145,13 +145,13 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
         Futures.addCallback(partitionsListFuture, new FutureCallback<List<Long>>() {
             @Override
             public void onSuccess(@Nullable List<Long> partitions) {
-                TsKvQueryCursor cursor = new TsKvQueryCursor(entityType, entityId, query, partitions);
+                TsKvQueryCursor cursor = new TsKvQueryCursor(entityId.getEntityType().name(), entityId.getId(), query, partitions);
                 findAllAsyncSequentiallyWithLimit(cursor, resultFuture);
             }
 
             @Override
             public void onFailure(Throwable t) {
-                log.error("[{}][{}] Failed to fetch partitions for interval {}-{}", entityType, entityId, minPartition, maxPartition, t);
+                log.error("[{}][{}] Failed to fetch partitions for interval {}-{}", entityId.getEntityType().name(), entityId.getId(), minPartition, maxPartition, t);
             }
         }, readResultsProcessingExecutor);
 
@@ -187,19 +187,19 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
         }
     }
 
-    private ListenableFuture<Optional<TsKvEntry>> findAndAggregateAsync(String entityType, UUID entityId, TsKvQuery query, long minPartition, long maxPartition) {
+    private ListenableFuture<Optional<TsKvEntry>> findAndAggregateAsync(EntityId entityId, TsKvQuery query, long minPartition, long maxPartition) {
         final Aggregation aggregation = query.getAggregation();
         final String key = query.getKey();
         final long startTs = query.getStartTs();
         final long endTs = query.getEndTs();
         final long ts = startTs + (endTs - startTs) / 2;
 
-        ResultSetFuture partitionsFuture = fetchPartitions(entityType, entityId, key, minPartition, maxPartition);
+        ResultSetFuture partitionsFuture = fetchPartitions(entityId, key, minPartition, maxPartition);
 
         ListenableFuture<List<Long>> partitionsListFuture = Futures.transform(partitionsFuture, getPartitionsArrayFunction(), readResultsProcessingExecutor);
 
         ListenableFuture<List<ResultSet>> aggregationChunks = Futures.transform(partitionsListFuture,
-                getFetchChunksAsyncFunction(entityType, entityId, key, aggregation, startTs, endTs), readResultsProcessingExecutor);
+                getFetchChunksAsyncFunction(entityId, key, aggregation, startTs, endTs), readResultsProcessingExecutor);
 
         return Futures.transform(aggregationChunks, new AggregatePartitionsFunction(aggregation, key, ts), readResultsProcessingExecutor);
     }
@@ -209,21 +209,21 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
                 .map(row -> row.getLong(ModelConstants.PARTITION_COLUMN)).collect(Collectors.toList());
     }
 
-    private AsyncFunction<List<Long>, List<ResultSet>> getFetchChunksAsyncFunction(String entityType, UUID entityId, String key, Aggregation aggregation, long startTs, long endTs) {
+    private AsyncFunction<List<Long>, List<ResultSet>> getFetchChunksAsyncFunction(EntityId entityId, String key, Aggregation aggregation, long startTs, long endTs) {
         return partitions -> {
             try {
                 PreparedStatement proto = getFetchStmt(aggregation);
                 List<ResultSetFuture> futures = new ArrayList<>(partitions.size());
                 for (Long partition : partitions) {
-                    log.trace("Fetching data for partition [{}] for entityType {} and entityId {}", partition, entityType, entityId);
+                    log.trace("Fetching data for partition [{}] for entityType {} and entityId {}", partition, entityId.getEntityType(), entityId.getId());
                     BoundStatement stmt = proto.bind();
-                    stmt.setString(0, entityType);
-                    stmt.setUUID(1, entityId);
+                    stmt.setString(0, entityId.getEntityType().name());
+                    stmt.setUUID(1, entityId.getId());
                     stmt.setString(2, key);
                     stmt.setLong(3, partition);
                     stmt.setLong(4, startTs);
                     stmt.setLong(5, endTs);
-                    log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityType, entityId);
+                    log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityId.getEntityType(), entityId.getId());
                     futures.add(executeAsyncRead(stmt));
                 }
                 return Futures.allAsList(futures);
@@ -235,57 +235,64 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
     }
 
     @Override
-    public ResultSetFuture findLatest(String entityType, UUID entityId, String key) {
+    public ResultSetFuture findLatest(EntityId entityId, String key) {
         BoundStatement stmt = getFindLatestStmt().bind();
-        stmt.setString(0, entityType);
-        stmt.setUUID(1, entityId);
+        stmt.setString(0, entityId.getEntityType().name());
+        stmt.setUUID(1, entityId.getId());
         stmt.setString(2, key);
-        log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityType, entityId);
+        log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityId.getEntityType(), entityId.getId());
         return executeAsyncRead(stmt);
     }
 
     @Override
-    public ResultSetFuture findAllLatest(String entityType, UUID entityId) {
+    public ResultSetFuture findAllLatest(EntityId entityId) {
         BoundStatement stmt = getFindAllLatestStmt().bind();
-        stmt.setString(0, entityType);
-        stmt.setUUID(1, entityId);
-        log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityType, entityId);
+        stmt.setString(0, entityId.getEntityType().name());
+        stmt.setUUID(1, entityId.getId());
+        log.debug("Generated query [{}] for entityType {} and entityId {}", stmt, entityId.getEntityType(), entityId.getId());
         return executeAsyncRead(stmt);
     }
 
     @Override
-    public ResultSetFuture save(String entityType, UUID entityId, long partition, TsKvEntry tsKvEntry) {
+    public ResultSetFuture save(EntityId entityId, long partition, TsKvEntry tsKvEntry, long ttl) {
         DataType type = tsKvEntry.getDataType();
-        BoundStatement stmt = getSaveStmt(type).bind()
-                .setString(0, entityType)
-                .setUUID(1, entityId)
+        BoundStatement stmt = (ttl == 0 ? getSaveStmt(type) : getSaveTtlStmt(type)).bind();
+        stmt.setString(0, entityId.getEntityType().name())
+                .setUUID(1, entityId.getId())
                 .setString(2, tsKvEntry.getKey())
                 .setLong(3, partition)
                 .setLong(4, tsKvEntry.getTs());
         addValue(tsKvEntry, stmt, 5);
+        if (ttl > 0) {
+            stmt.setInt(6, (int) ttl);
+        }
         return executeAsyncWrite(stmt);
     }
 
     @Override
-    public ResultSetFuture saveLatest(String entityType, UUID entityId, TsKvEntry tsKvEntry) {
+    public ResultSetFuture savePartition(EntityId entityId, long partition, String key, long ttl) {
+        log.debug("Saving partition {} for the entity [{}-{}] and key {}", partition, entityId.getEntityType(), entityId.getId(), key);
+        BoundStatement stmt = (ttl == 0 ? getPartitionInsertStmt() : getPartitionInsertTtlStmt()).bind();
+        stmt = stmt.setString(0, entityId.getEntityType().name())
+                .setUUID(1, entityId.getId())
+                .setLong(2, partition)
+                .setString(3, key);
+        if (ttl > 0) {
+            stmt.setInt(4, (int) ttl);
+        }
+        return executeAsyncWrite(stmt);
+    }
+
+    @Override
+    public ResultSetFuture saveLatest(EntityId entityId, TsKvEntry tsKvEntry) {
         DataType type = tsKvEntry.getDataType();
         BoundStatement stmt = getLatestStmt(type).bind()
-                .setString(0, entityType)
-                .setUUID(1, entityId)
+                .setString(0, entityId.getEntityType().name())
+                .setUUID(1, entityId.getId())
                 .setString(2, tsKvEntry.getKey())
                 .setLong(3, tsKvEntry.getTs());
         addValue(tsKvEntry, stmt, 4);
         return executeAsyncWrite(stmt);
-    }
-
-    @Override
-    public ResultSetFuture savePartition(String entityType, UUID entityId, long partition, String key) {
-        log.debug("Saving partition {} for the entity [{}-{}] and key {}", partition, entityType, entityId, key);
-        return executeAsyncWrite(getPartitionInsertStmt().bind()
-                .setString(0, entityType)
-                .setUUID(1, entityId)
-                .setLong(2, partition)
-                .setString(3, key));
     }
 
     @Override
@@ -339,9 +346,9 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
      * Select existing partitions from the table
      * <code>{@link ModelConstants#TS_KV_PARTITIONS_CF}</code> for the given entity
      */
-    private ResultSetFuture fetchPartitions(String entityType, UUID entityId, String key, long minPartition, long maxPartition) {
-        Select.Where select = QueryBuilder.select(ModelConstants.PARTITION_COLUMN).from(ModelConstants.TS_KV_PARTITIONS_CF).where(eq(ModelConstants.ENTITY_TYPE_COLUMN, entityType))
-                .and(eq(ModelConstants.ENTITY_ID_COLUMN, entityId)).and(eq(ModelConstants.KEY_COLUMN, key));
+    private ResultSetFuture fetchPartitions(EntityId entityId, String key, long minPartition, long maxPartition) {
+        Select.Where select = QueryBuilder.select(ModelConstants.PARTITION_COLUMN).from(ModelConstants.TS_KV_PARTITIONS_CF).where(eq(ModelConstants.ENTITY_TYPE_COLUMN, entityId.getEntityType().name()))
+                .and(eq(ModelConstants.ENTITY_ID_COLUMN, entityId.getId())).and(eq(ModelConstants.KEY_COLUMN, key));
         select.and(QueryBuilder.gte(ModelConstants.PARTITION_COLUMN, minPartition));
         select.and(QueryBuilder.lte(ModelConstants.PARTITION_COLUMN, maxPartition));
         return executeAsyncRead(select);
@@ -362,6 +369,23 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
             }
         }
         return saveStmts[dataType.ordinal()];
+    }
+
+    private PreparedStatement getSaveTtlStmt(DataType dataType) {
+        if (saveTtlStmts == null) {
+            saveTtlStmts = new PreparedStatement[DataType.values().length];
+            for (DataType type : DataType.values()) {
+                saveTtlStmts[type.ordinal()] = getSession().prepare("INSERT INTO " + ModelConstants.TS_KV_CF +
+                        "(" + ModelConstants.ENTITY_TYPE_COLUMN +
+                        "," + ModelConstants.ENTITY_ID_COLUMN +
+                        "," + ModelConstants.KEY_COLUMN +
+                        "," + ModelConstants.PARTITION_COLUMN +
+                        "," + ModelConstants.TS_COLUMN +
+                        "," + getColumnName(type) + ")" +
+                        " VALUES(?, ?, ?, ?, ?, ?) USING TTL ?");
+            }
+        }
+        return saveTtlStmts[dataType.ordinal()];
     }
 
     private PreparedStatement getFetchStmt(Aggregation aggType) {
@@ -416,6 +440,19 @@ public class BaseTimeseriesDao extends AbstractAsyncDao implements TimeseriesDao
         }
         return partitionInsertStmt;
     }
+
+    private PreparedStatement getPartitionInsertTtlStmt() {
+        if (partitionInsertTtlStmt == null) {
+            partitionInsertTtlStmt = getSession().prepare("INSERT INTO " + ModelConstants.TS_KV_PARTITIONS_CF +
+                    "(" + ModelConstants.ENTITY_TYPE_COLUMN +
+                    "," + ModelConstants.ENTITY_ID_COLUMN +
+                    "," + ModelConstants.PARTITION_COLUMN +
+                    "," + ModelConstants.KEY_COLUMN + ")" +
+                    " VALUES(?, ?, ?, ?) USING TTL ?");
+        }
+        return partitionInsertTtlStmt;
+    }
+
 
     private PreparedStatement getFindLatestStmt() {
         if (findLatestStmt == null) {

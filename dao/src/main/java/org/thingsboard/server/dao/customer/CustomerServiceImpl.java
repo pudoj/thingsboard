@@ -17,6 +17,7 @@ package org.thingsboard.server.dao.customer;
 
 import static org.thingsboard.server.dao.DaoUtil.convertDataList;
 import static org.thingsboard.server.dao.DaoUtil.getData;
+import static org.thingsboard.server.dao.service.Validator.validateId;
 
 import java.io.IOException;
 import java.util.List;
@@ -24,6 +25,9 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Function;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.thingsboard.server.common.data.Customer;
@@ -33,6 +37,7 @@ import org.thingsboard.server.common.data.page.TextPageData;
 import org.thingsboard.server.common.data.page.TextPageLink;
 import org.thingsboard.server.dao.dashboard.DashboardService;
 import org.thingsboard.server.dao.device.DeviceService;
+import org.thingsboard.server.dao.entity.AbstractEntityService;
 import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.exception.IncorrectParameterException;
 import org.thingsboard.server.dao.model.CustomerEntity;
@@ -41,14 +46,12 @@ import org.thingsboard.server.dao.service.DataValidator;
 import org.thingsboard.server.dao.service.PaginatedRemover;
 import org.thingsboard.server.dao.tenant.TenantDao;
 import org.thingsboard.server.dao.user.UserService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.thingsboard.server.dao.service.Validator;
 @Service
 @Slf4j
-public class CustomerServiceImpl implements CustomerService {
+public class CustomerServiceImpl extends AbstractEntityService implements CustomerService {
 
     private static final String PUBLIC_CUSTOMER_TITLE = "Public";
 
@@ -76,6 +79,14 @@ public class CustomerServiceImpl implements CustomerService {
     }
 
     @Override
+    public ListenableFuture<Customer> findCustomerByIdAsync(CustomerId customerId) {
+        log.trace("Executing findCustomerByIdAsync [{}]", customerId);
+        validateId(customerId, "Incorrect customerId " + customerId);
+        ListenableFuture<CustomerEntity> customerEntity = customerDao.findByIdAsync(customerId.getId());
+        return Futures.transform(customerEntity, (Function<? super CustomerEntity, ? extends Customer>) input -> getData(input));
+    }
+
+    @Override
     public Customer saveCustomer(Customer customer) {
         log.trace("Executing saveCustomer [{}]", customer);
         customerValidator.validate(customer);
@@ -93,7 +104,8 @@ public class CustomerServiceImpl implements CustomerService {
         }
         dashboardService.unassignCustomerDashboards(customer.getTenantId(), customerId);
         deviceService.unassignCustomerDevices(customer.getTenantId(), customerId);
-        userService.deleteCustomerUsers(customer.getTenantId(), customerId);               
+        userService.deleteCustomerUsers(customer.getTenantId(), customerId);
+        deleteEntityRelations(customerId);
         customerDao.removeById(customerId.getId());
     }
 

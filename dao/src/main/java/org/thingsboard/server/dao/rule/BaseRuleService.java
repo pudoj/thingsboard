@@ -17,6 +17,8 @@ package org.thingsboard.server.dao.rule;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +33,7 @@ import org.thingsboard.server.common.data.plugin.ComponentType;
 import org.thingsboard.server.common.data.plugin.PluginMetaData;
 import org.thingsboard.server.common.data.rule.RuleMetaData;
 import org.thingsboard.server.dao.component.ComponentDescriptorService;
+import org.thingsboard.server.dao.entity.AbstractEntityService;
 import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.exception.DatabaseException;
 import org.thingsboard.server.dao.exception.IncorrectParameterException;
@@ -53,7 +56,7 @@ import static org.thingsboard.server.dao.service.Validator.validatePageLink;
 
 @Service
 @Slf4j
-public class BaseRuleService implements RuleService {
+public class BaseRuleService extends AbstractEntityService implements RuleService {
 
     private final TenantId systemTenantId = new TenantId(NULL_UUID);
 
@@ -167,6 +170,13 @@ public class BaseRuleService implements RuleService {
     }
 
     @Override
+    public ListenableFuture<RuleMetaData> findRuleByIdAsync(RuleId ruleId) {
+        validateId(ruleId, "Incorrect rule id for search rule request.");
+        ListenableFuture<RuleMetaDataEntity> ruleEntity = ruleDao.findByIdAsync(ruleId.getId());
+        return Futures.transform(ruleEntity, (com.google.common.base.Function<? super RuleMetaDataEntity, ? extends RuleMetaData>) input -> getData(input));
+    }
+
+    @Override
     public List<RuleMetaData> findPluginRules(String pluginToken) {
         List<RuleMetaDataEntity> ruleEntities = ruleDao.findRulesByPlugin(pluginToken);
         return convertDataList(ruleEntities);
@@ -235,6 +245,7 @@ public class BaseRuleService implements RuleService {
     @Override
     public void deleteRuleById(RuleId ruleId) {
         validateId(ruleId, "Incorrect rule id for delete rule request.");
+        deleteEntityRelations(ruleId);
         ruleDao.deleteById(ruleId);
     }
 

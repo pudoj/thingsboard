@@ -18,13 +18,11 @@ package org.thingsboard.server.dao.timeseries;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Row;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.thingsboard.server.common.data.id.EntityId;
 import org.thingsboard.server.common.data.kv.TsKvEntry;
 import org.thingsboard.server.common.data.kv.TsKvQuery;
 
 import java.util.List;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
 
 /**
  * @author Andrew Shvayka
@@ -33,17 +31,17 @@ public interface TimeseriesDao {
 
     long toPartitionTs(long ts);
 
-    ListenableFuture<List<TsKvEntry>> findAllAsync(String entityType, UUID entityId, List<TsKvQuery> queries);
+    ListenableFuture<List<TsKvEntry>> findAllAsync(EntityId entityId, List<TsKvQuery> queries);
 
-    ResultSetFuture findLatest(String entityType, UUID entityId, String key);
+    ResultSetFuture findLatest(EntityId entityId, String key);
 
-    ResultSetFuture findAllLatest(String entityType, UUID entityId);
+    ResultSetFuture findAllLatest(EntityId entityId);
 
-    ResultSetFuture save(String entityType, UUID entityId, long partition, TsKvEntry tsKvEntry);
+    ResultSetFuture save(EntityId entityId, long partition, TsKvEntry tsKvEntry, long ttl);
 
-    ResultSetFuture savePartition(String entityType, UUID entityId, long partition, String key);
+    ResultSetFuture savePartition(EntityId entityId, long partition, String key, long ttl);
 
-    ResultSetFuture saveLatest(String entityType, UUID entityId, TsKvEntry tsKvEntry);
+    ResultSetFuture saveLatest(EntityId entityId, TsKvEntry tsKvEntry);
 
     TsKvEntry convertResultToTsKvEntry(Row row);
 

@@ -21,8 +21,10 @@ export default angular.module('thingsboard.utils', [thingsboardTypes])
     .factory('utils', Utils)
     .name;
 
+const varsRegex = /\$\{([^\}]*)\}/g;
+
 /*@ngInject*/
-function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
+function Utils($mdColorPalette, $rootScope, $window, $translate, types) {
 
     var predefinedFunctions = {},
         predefinedFunctionsList = [],
@@ -93,9 +95,32 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
         dataKeys: [angular.copy(defaultDataKey)]
     };
 
+    var defaultAlarmFields = [
+        'createdTime',
+        'originator',
+        'type',
+        'severity',
+        'status'
+    ];
+
+    var defaultAlarmDataKeys = [];
+    for (var i=0;i<defaultAlarmFields.length;i++) {
+        var name = defaultAlarmFields[i];
+        var dataKey = {
+            name: name,
+            type: types.dataKeyType.alarm,
+            label: $translate.instant(types.alarmFields[name].name)+'',
+            color: getMaterialColor(i),
+            settings: {},
+            _hash: Math.random()
+        };
+        defaultAlarmDataKeys.push(dataKey);
+    }
+
     var service = {
         getDefaultDatasource: getDefaultDatasource,
         getDefaultDatasourceJson: getDefaultDatasourceJson,
+        getDefaultAlarmDataKeys: getDefaultAlarmDataKeys,
         getMaterialColor: getMaterialColor,
         getPredefinedFunctionBody: getPredefinedFunctionBody,
         getPredefinedFunctionsList: getPredefinedFunctionsList,
@@ -106,8 +131,12 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
         isDescriptorSchemaNotEmpty: isDescriptorSchemaNotEmpty,
         filterSearchTextEntities: filterSearchTextEntities,
         guid: guid,
-        createDatasoucesFromSubscriptionsInfo: createDatasoucesFromSubscriptionsInfo,
-        isLocalUrl: isLocalUrl
+        cleanCopy: cleanCopy,
+        isLocalUrl: isLocalUrl,
+        validateDatasources: validateDatasources,
+        createKey: createKey,
+        createLabelFromDatasource: createLabelFromDatasource,
+        insertVariable: insertVariable
     }
 
     return service;
@@ -210,6 +239,10 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
         return angular.toJson(getDefaultDatasource(dataKeySchema));
     }
 
+    function getDefaultAlarmDataKeys() {
+        return angular.copy(defaultAlarmDataKeys);
+    }
+
     function isDescriptorSchemaNotEmpty(descriptor) {
         if (descriptor && descriptor.schema && descriptor.schema.properties) {
             for(var prop in descriptor.schema.properties) {
@@ -289,6 +322,16 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
             s4() + '-' + s4() + s4() + s4();
     }
 
+    function cleanCopy(object) {
+        var copy = angular.copy(object);
+        for (var prop in copy) {
+            if (prop && prop.startsWith('$$')) {
+                delete copy[prop];
+            }
+        }
+        return copy;
+    }
+
     function genNextColor(datasources) {
         var index = 0;
         if (datasources) {
@@ -300,21 +343,37 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
         return getMaterialColor(index);
     }
 
-    /*var defaultDataKey = {
-        name: 'f(x)',
-        type: types.dataKeyType.function,
-        label: 'Sin',
-        color: getMaterialColor(0),
-        funcBody: getPredefinedFunctionBody('Sin'),
-        settings: {},
-        _hash: Math.random()
-    };
+    function isLocalUrl(url) {
+        var parser = document.createElement('a'); //eslint-disable-line
+        parser.href = url;
+        var host = parser.hostname;
+        if (host === "localhost" || host === "127.0.0.1") {
+            return true;
+        } else {
+            return false;
+        }
+    }
 
-    var defaultDatasource = {
-        type: types.datasourceType.function,
-        name: types.datasourceType.function,
-        dataKeys: [angular.copy(defaultDataKey)]
-    };*/
+    function validateDatasources(datasources) {
+        datasources.forEach(function (datasource) {
+            if (datasource.type === 'device') {
+                datasource.type = types.datasourceType.entity;
+                datasource.entityType = types.entityType.device;
+                if (datasource.deviceId) {
+                    datasource.entityId = datasource.deviceId;
+                } else if (datasource.deviceAliasId) {
+                    datasource.entityAliasId = datasource.deviceAliasId;
+                }
+                if (datasource.deviceName) {
+                    datasource.entityName = datasource.deviceName;
+                }
+            }
+            if (datasource.type === types.datasourceType.entity && datasource.entityId) {
+                datasource.name = datasource.entityName;
+            }
+        });
+        return datasources;
+    }
 
     function createKey(keyInfo, type, datasources) {
         var dataKey = {
@@ -329,115 +388,38 @@ function Utils($mdColorPalette, $rootScope, $window, $q, deviceService, types) {
         return dataKey;
     }
 
-    function createDatasourceKeys(keyInfos, type, datasource, datasources) {
-        for (var i=0;i<keyInfos.length;i++) {
-            var keyInfo = keyInfos[i];
-            var dataKey = createKey(keyInfo, type, datasources);
-            datasource.dataKeys.push(dataKey);
-        }
-    }
-
-    function createDatasourceFromSubscription(subscriptionInfo, datasources, device) {
-        var datasource;
-        if (subscriptionInfo.type === types.datasourceType.device) {
-            datasource = {
-                type: subscriptionInfo.type,
-                deviceName: device.name,
-                name: device.name,
-                deviceId: device.id.id,
-                dataKeys: []
+    function createLabelFromDatasource(datasource, pattern) {
+        var label = angular.copy(pattern);
+        var match = varsRegex.exec(pattern);
+        while (match !== null) {
+            var variable = match[0];
+            var variableName = match[1];
+            if (variableName === 'dsName') {
+                label = label.split(variable).join(datasource.name);
+            } else if (variableName === 'entityName') {
+                label = label.split(variable).join(datasource.entityName);
+            } else if (variableName === 'deviceName') {
+                label = label.split(variable).join(datasource.entityName);
+            } else if (variableName === 'aliasName') {
+                label = label.split(variable).join(datasource.aliasName);
             }
-        } else if (subscriptionInfo.type === types.datasourceType.function) {
-            datasource = {
-                type: subscriptionInfo.type,
-                name: subscriptionInfo.name || types.datasourceType.function,
-                dataKeys: []
+            match = varsRegex.exec(pattern);
+        }
+        return label;
+    }
+
+    function insertVariable(pattern, name, value) {
+        var result = angular.copy(pattern);
+        var match = varsRegex.exec(pattern);
+        while (match !== null) {
+            var variable = match[0];
+            var variableName = match[1];
+            if (variableName === name) {
+                result = result.split(variable).join(value);
             }
+            match = varsRegex.exec(pattern);
         }
-        datasources.push(datasource);
-        if (subscriptionInfo.timeseries) {
-            createDatasourceKeys(subscriptionInfo.timeseries, types.dataKeyType.timeseries, datasource, datasources);
-        }
-        if (subscriptionInfo.attributes) {
-            createDatasourceKeys(subscriptionInfo.attributes, types.dataKeyType.attribute, datasource, datasources);
-        }
-        if (subscriptionInfo.functions) {
-            createDatasourceKeys(subscriptionInfo.functions, types.dataKeyType.function, datasource, datasources);
-        }
-    }
-
-    function processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred) {
-        if (index < subscriptionsInfo.length) {
-            var subscriptionInfo = subscriptionsInfo[index];
-            if (subscriptionInfo.type === types.datasourceType.device) {
-                if (subscriptionInfo.deviceId) {
-                    deviceService.getDevice(subscriptionInfo.deviceId, true, {ignoreLoading: true}).then(
-                        function success(device) {
-                            createDatasourceFromSubscription(subscriptionInfo, datasources, device);
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        },
-                        function fail() {
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        }
-                    );
-                } else if (subscriptionInfo.deviceName || subscriptionInfo.deviceNamePrefix
-                    || subscriptionInfo.deviceIds) {
-                    var promise;
-                    if (subscriptionInfo.deviceName) {
-                        promise = deviceService.fetchAliasDeviceByNameFilter(subscriptionInfo.deviceName, 1, false, {ignoreLoading: true});
-                    } else if (subscriptionInfo.deviceNamePrefix) {
-                        promise = deviceService.fetchAliasDeviceByNameFilter(subscriptionInfo.deviceNamePrefix, 100, false, {ignoreLoading: true});
-                    } else if (subscriptionInfo.deviceIds) {
-                        promise = deviceService.getDevices(subscriptionInfo.deviceIds, {ignoreLoading: true});
-                    }
-                    promise.then(
-                        function success(devices) {
-                            if (devices && devices.length > 0) {
-                                for (var i = 0; i < devices.length; i++) {
-                                    var device = devices[i];
-                                    createDatasourceFromSubscription(subscriptionInfo, datasources, device);
-                                }
-                            }
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        },
-                        function fail() {
-                            index++;
-                            processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                        }
-                    )
-                } else {
-                    index++;
-                    processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-                }
-            } else if (subscriptionInfo.type === types.datasourceType.function) {
-                createDatasourceFromSubscription(subscriptionInfo, datasources);
-                index++;
-                processSubscriptionsInfo(index, subscriptionsInfo, datasources, deferred);
-            }
-        } else {
-            deferred.resolve(datasources);
-        }
-    }
-
-    function createDatasoucesFromSubscriptionsInfo(subscriptionsInfo) {
-        var deferred = $q.defer();
-        var datasources = [];
-        processSubscriptionsInfo(0, subscriptionsInfo, datasources, deferred);
-        return deferred.promise;
-    }
-
-    function isLocalUrl(url) {
-        var parser = document.createElement('a'); //eslint-disable-line
-        parser.href = url;
-        var host = parser.hostname;
-        if (host === "localhost" || host === "127.0.0.1") {
-            return true;
-        } else {
-            return false;
-        }
+        return result;
     }
 
 }

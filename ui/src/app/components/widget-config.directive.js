@@ -16,7 +16,7 @@
 import jsonSchemaDefaults from 'json-schema-defaults';
 import thingsboardTypes from '../common/types.constant';
 import thingsboardUtils from '../common/utils.service';
-import thingsboardDeviceAliasSelect from './device-alias-select.directive';
+import thingsboardEntityAliasSelect from './entity-alias-select.directive';
 import thingsboardDatasource from './datasource.directive';
 import thingsboardTimewindow from './timewindow.directive';
 import thingsboardLegendConfig from './legend-config.directive';
@@ -34,7 +34,7 @@ import widgetConfigTemplate from './widget-config.tpl.html';
 export default angular.module('thingsboard.directives.widgetConfig', [thingsboardTypes,
     thingsboardUtils,
     thingsboardJsonForm,
-    thingsboardDeviceAliasSelect,
+    thingsboardEntityAliasSelect,
     thingsboardDatasource,
     thingsboardTimewindow,
     thingsboardLegendConfig,
@@ -43,7 +43,7 @@ export default angular.module('thingsboard.directives.widgetConfig', [thingsboar
     .name;
 
 /*@ngInject*/
-function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, utils) {
+function WidgetConfig($compile, $templateCache, $rootScope, $translate, $timeout, types, utils) {
 
     var linker = function (scope, element, attrs, ngModelCtrl) {
 
@@ -87,60 +87,82 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
             value: null
         }
 
+        scope.alarmSource = {
+            value: null
+        }
+
         ngModelCtrl.$render = function () {
             if (ngModelCtrl.$viewValue) {
-                scope.selectedTab = 0;
-                scope.title = ngModelCtrl.$viewValue.title;
-                scope.showTitle = ngModelCtrl.$viewValue.showTitle;
-                scope.dropShadow = angular.isDefined(ngModelCtrl.$viewValue.dropShadow) ? ngModelCtrl.$viewValue.dropShadow : true;
-                scope.enableFullscreen = angular.isDefined(ngModelCtrl.$viewValue.enableFullscreen) ? ngModelCtrl.$viewValue.enableFullscreen : true;
-                scope.backgroundColor = ngModelCtrl.$viewValue.backgroundColor;
-                scope.color = ngModelCtrl.$viewValue.color;
-                scope.padding = ngModelCtrl.$viewValue.padding;
-                scope.titleStyle =
-                    angular.toJson(angular.isDefined(ngModelCtrl.$viewValue.titleStyle) ? ngModelCtrl.$viewValue.titleStyle : {
-                        fontSize: '16px',
-                        fontWeight: 400
-                    }, true);
-                scope.mobileOrder = ngModelCtrl.$viewValue.mobileOrder;
-                scope.mobileHeight = ngModelCtrl.$viewValue.mobileHeight;
-                scope.units = ngModelCtrl.$viewValue.units;
-                scope.decimals = ngModelCtrl.$viewValue.decimals;
-                scope.useDashboardTimewindow = angular.isDefined(ngModelCtrl.$viewValue.useDashboardTimewindow) ?
-                    ngModelCtrl.$viewValue.useDashboardTimewindow : true;
-                scope.timewindow = ngModelCtrl.$viewValue.timewindow;
-                scope.showLegend = angular.isDefined(ngModelCtrl.$viewValue.showLegend) ?
-                    ngModelCtrl.$viewValue.showLegend : scope.widgetType === types.widgetType.timeseries.value;
-                scope.legendConfig = ngModelCtrl.$viewValue.legendConfig;
-                if (scope.widgetType !== types.widgetType.rpc.value && scope.widgetType !== types.widgetType.static.value
-                    && scope.isDataEnabled) {
-                    if (scope.datasources) {
-                        scope.datasources.splice(0, scope.datasources.length);
-                    } else {
-                        scope.datasources = [];
-                    }
-                    if (ngModelCtrl.$viewValue.datasources) {
-                        for (var i in ngModelCtrl.$viewValue.datasources) {
-                            scope.datasources.push({value: ngModelCtrl.$viewValue.datasources[i]});
+                var config = ngModelCtrl.$viewValue.config;
+                var layout = ngModelCtrl.$viewValue.layout;
+                if (config) {
+                    scope.selectedTab = 0;
+                    scope.title = config.title;
+                    scope.showTitle = config.showTitle;
+                    scope.dropShadow = angular.isDefined(config.dropShadow) ? config.dropShadow : true;
+                    scope.enableFullscreen = angular.isDefined(config.enableFullscreen) ? config.enableFullscreen : true;
+                    scope.backgroundColor = config.backgroundColor;
+                    scope.color = config.color;
+                    scope.padding = config.padding;
+                    scope.titleStyle =
+                        angular.toJson(angular.isDefined(config.titleStyle) ? config.titleStyle : {
+                            fontSize: '16px',
+                            fontWeight: 400
+                        }, true);
+                    scope.units = config.units;
+                    scope.decimals = config.decimals;
+                    scope.useDashboardTimewindow = angular.isDefined(config.useDashboardTimewindow) ?
+                        config.useDashboardTimewindow : true;
+                    scope.timewindow = config.timewindow;
+                    scope.showLegend = angular.isDefined(config.showLegend) ?
+                        config.showLegend : scope.widgetType === types.widgetType.timeseries.value;
+                    scope.legendConfig = config.legendConfig;
+                    if (scope.widgetType !== types.widgetType.rpc.value &&
+                        scope.widgetType !== types.widgetType.alarm.value &&
+                        scope.widgetType !== types.widgetType.static.value
+                        && scope.isDataEnabled) {
+                        if (scope.datasources) {
+                            scope.datasources.splice(0, scope.datasources.length);
+                        } else {
+                            scope.datasources = [];
                         }
-                    }
-                } else if (scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
-                    if (ngModelCtrl.$viewValue.targetDeviceAliasIds && ngModelCtrl.$viewValue.targetDeviceAliasIds.length > 0) {
-                        var aliasId = ngModelCtrl.$viewValue.targetDeviceAliasIds[0];
-                        if (scope.deviceAliases[aliasId]) {
-                            scope.targetDeviceAlias.value = {id: aliasId, alias: scope.deviceAliases[aliasId].alias,
-                                deviceId: scope.deviceAliases[aliasId].deviceId};
+                        if (config.datasources) {
+                            for (var i in config.datasources) {
+                                scope.datasources.push({value: config.datasources[i]});
+                            }
+                        }
+                    } else if (scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
+                        if (config.targetDeviceAliasIds && config.targetDeviceAliasIds.length > 0) {
+                            var aliasId = config.targetDeviceAliasIds[0];
+                            var entityAliases = scope.aliasController.getEntityAliases();
+                            if (entityAliases[aliasId]) {
+                                scope.targetDeviceAlias.value = entityAliases[aliasId];
+                            } else {
+                                scope.targetDeviceAlias.value = null;
+                            }
                         } else {
                             scope.targetDeviceAlias.value = null;
                         }
-                    } else {
-                        scope.targetDeviceAlias.value = null;
+                    } else if (scope.widgetType === types.widgetType.alarm.value && scope.isDataEnabled) {
+                        scope.alarmSearchStatus = angular.isDefined(config.alarmSearchStatus) ?
+                            config.alarmSearchStatus : types.alarmSearchStatus.any;
+                        scope.alarmsPollingInterval = angular.isDefined(config.alarmsPollingInterval) ?
+                            config.alarmsPollingInterval : 5;
+                        if (config.alarmSource) {
+                            scope.alarmSource.value = config.alarmSource;
+                        } else {
+                            scope.alarmSource.value = null;
+                        }
                     }
+
+                    scope.settings = config.settings;
+
+                    scope.updateSchemaForm();
                 }
-
-                scope.settings = ngModelCtrl.$viewValue.settings;
-
-                scope.updateSchemaForm();
+                if (layout) {
+                    scope.mobileOrder = layout.mobileOrder;
+                    scope.mobileHeight = layout.mobileHeight;
+                }
             }
         };
 
@@ -163,45 +185,60 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
         scope.updateValidity = function () {
             if (ngModelCtrl.$viewValue) {
                 var value = ngModelCtrl.$viewValue;
-                var valid;
-                if (scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
-                    valid = value && value.targetDeviceAliasIds && value.targetDeviceAliasIds.length > 0;
-                    ngModelCtrl.$setValidity('targetDeviceAliasIds', valid);
-                } else if (scope.widgetType !== types.widgetType.static.value && scope.isDataEnabled) {
-                    valid = value && value.datasources && value.datasources.length > 0;
-                    ngModelCtrl.$setValidity('datasources', valid);
-                }
-                try {
-                    angular.fromJson(scope.titleStyle);
-                    ngModelCtrl.$setValidity('titleStyle', true);
-                } catch (e) {
-                    ngModelCtrl.$setValidity('titleStyle', false);
+                var config = value.config;
+                if (config) {
+                    var valid;
+                    if (scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
+                        valid = config && config.targetDeviceAliasIds && config.targetDeviceAliasIds.length > 0;
+                        ngModelCtrl.$setValidity('targetDeviceAliasIds', valid);
+                    } else if (scope.widgetType === types.widgetType.alarm.value && scope.isDataEnabled) {
+                        valid = config && config.alarmSource;
+                        ngModelCtrl.$setValidity('alarmSource', valid);
+                    } else if (scope.widgetType !== types.widgetType.static.value && scope.isDataEnabled) {
+                        valid = config && config.datasources && config.datasources.length > 0;
+                        ngModelCtrl.$setValidity('datasources', valid);
+                    }
+                    try {
+                        angular.fromJson(scope.titleStyle);
+                        ngModelCtrl.$setValidity('titleStyle', true);
+                    } catch (e) {
+                        ngModelCtrl.$setValidity('titleStyle', false);
+                    }
                 }
             }
         };
 
         scope.$watch('title + showTitle + dropShadow + enableFullscreen + backgroundColor + color + ' +
-            'padding + titleStyle + mobileOrder + mobileHeight + units + decimals + useDashboardTimewindow + showLegend', function () {
+            'padding + titleStyle + mobileOrder + mobileHeight + units + decimals + useDashboardTimewindow + ' +
+            'alarmSearchStatus + alarmsPollingInterval + showLegend', function () {
             if (ngModelCtrl.$viewValue) {
                 var value = ngModelCtrl.$viewValue;
-                value.title = scope.title;
-                value.showTitle = scope.showTitle;
-                value.dropShadow = scope.dropShadow;
-                value.enableFullscreen = scope.enableFullscreen;
-                value.backgroundColor = scope.backgroundColor;
-                value.color = scope.color;
-                value.padding = scope.padding;
-                try {
-                    value.titleStyle = angular.fromJson(scope.titleStyle);
-                } catch (e) {
-                    value.titleStyle = {};
+                if (value.config) {
+                    var config = value.config;
+                    config.title = scope.title;
+                    config.showTitle = scope.showTitle;
+                    config.dropShadow = scope.dropShadow;
+                    config.enableFullscreen = scope.enableFullscreen;
+                    config.backgroundColor = scope.backgroundColor;
+                    config.color = scope.color;
+                    config.padding = scope.padding;
+                    try {
+                        config.titleStyle = angular.fromJson(scope.titleStyle);
+                    } catch (e) {
+                        config.titleStyle = {};
+                    }
+                    config.units = scope.units;
+                    config.decimals = scope.decimals;
+                    config.useDashboardTimewindow = scope.useDashboardTimewindow;
+                    config.alarmSearchStatus = scope.alarmSearchStatus;
+                    config.alarmsPollingInterval = scope.alarmsPollingInterval;
+                    config.showLegend = scope.showLegend;
                 }
-                value.mobileOrder = angular.isNumber(scope.mobileOrder) ? scope.mobileOrder : undefined;
-                value.mobileHeight = scope.mobileHeight;
-                value.units = scope.units;
-                value.decimals = scope.decimals;
-                value.useDashboardTimewindow = scope.useDashboardTimewindow;
-                value.showLegend = scope.showLegend;
+                if (value.layout) {
+                    var layout = value.layout;
+                    layout.mobileOrder = angular.isNumber(scope.mobileOrder) ? scope.mobileOrder : undefined;
+                    layout.mobileHeight = scope.mobileHeight;
+                }
                 ngModelCtrl.$setViewValue(value);
                 scope.updateValidity();
             }
@@ -210,39 +247,48 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
         scope.$watch('currentSettings', function () {
             if (ngModelCtrl.$viewValue) {
                 var value = ngModelCtrl.$viewValue;
-                value.settings = scope.currentSettings;
-                ngModelCtrl.$setViewValue(value);
+                if (value.config) {
+                    value.config.settings = scope.currentSettings;
+                    ngModelCtrl.$setViewValue(value);
+                }
             }
         }, true);
 
         scope.$watch('timewindow', function () {
             if (ngModelCtrl.$viewValue) {
                 var value = ngModelCtrl.$viewValue;
-                value.timewindow = scope.timewindow;
-                ngModelCtrl.$setViewValue(value);
+                if (value.config) {
+                    value.config.timewindow = scope.timewindow;
+                    ngModelCtrl.$setViewValue(value);
+                }
             }
         }, true);
 
         scope.$watch('legendConfig', function () {
             if (ngModelCtrl.$viewValue) {
                 var value = ngModelCtrl.$viewValue;
-                value.legendConfig = scope.legendConfig;
-                ngModelCtrl.$setViewValue(value);
+                if (value.config) {
+                    value.config.legendConfig = scope.legendConfig;
+                    ngModelCtrl.$setViewValue(value);
+                }
             }
         }, true);
 
         scope.$watch('datasources', function () {
-            if (ngModelCtrl.$viewValue && scope.widgetType !== types.widgetType.rpc.value
+            if (ngModelCtrl.$viewValue && ngModelCtrl.$viewValue.config
+                && scope.widgetType !== types.widgetType.rpc.value
+                && scope.widgetType !== types.widgetType.alarm.value
                 && scope.widgetType !== types.widgetType.static.value && scope.isDataEnabled) {
                 var value = ngModelCtrl.$viewValue;
-                if (value.datasources) {
-                    value.datasources.splice(0, value.datasources.length);
+                var config = value.config;
+                if (config.datasources) {
+                    config.datasources.splice(0, config.datasources.length);
                 } else {
-                    value.datasources = [];
+                    config.datasources = [];
                 }
                 if (scope.datasources) {
                     for (var i in scope.datasources) {
-                        value.datasources.push(scope.datasources[i].value);
+                        config.datasources.push(scope.datasources[i].value);
                     }
                 }
                 ngModelCtrl.$setViewValue(value);
@@ -251,12 +297,27 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
         }, true);
 
         scope.$watch('targetDeviceAlias.value', function () {
-            if (ngModelCtrl.$viewValue && scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
+            if (ngModelCtrl.$viewValue && ngModelCtrl.$viewValue.config && scope.widgetType === types.widgetType.rpc.value && scope.isDataEnabled) {
                 var value = ngModelCtrl.$viewValue;
+                var config = value.config;
                 if (scope.targetDeviceAlias.value) {
-                    value.targetDeviceAliasIds = [scope.targetDeviceAlias.value.id];
+                    config.targetDeviceAliasIds = [scope.targetDeviceAlias.value.id];
                 } else {
-                    value.targetDeviceAliasIds = [];
+                    config.targetDeviceAliasIds = [];
+                }
+                ngModelCtrl.$setViewValue(value);
+                scope.updateValidity();
+            }
+        });
+
+        scope.$watch('alarmSource.value', function () {
+            if (ngModelCtrl.$viewValue && ngModelCtrl.$viewValue.config && scope.widgetType === types.widgetType.alarm.value && scope.isDataEnabled) {
+                var value = ngModelCtrl.$viewValue;
+                var config = value.config;
+                if (scope.alarmSource.value) {
+                    config.alarmSource = scope.alarmSource.value;
+                } else {
+                    config.alarmSource = null;
                 }
                 ngModelCtrl.$setViewValue(value);
                 scope.updateValidity();
@@ -269,7 +330,7 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
                 newDatasource = angular.copy(utils.getDefaultDatasource(scope.datakeySettingsSchema.schema));
                 newDatasource.dataKeys = [scope.generateDataKey('Sin', types.dataKeyType.function)];
             } else {
-                newDatasource = { type: types.datasourceType.device,
+                newDatasource = { type: types.datasourceType.entity,
                     dataKeys: []
                 };
             }
@@ -297,10 +358,19 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
                 return chip;
             }
 
+            var label = chip;
+            if (type === types.dataKeyType.alarm) {
+                var alarmField = types.alarmFields[chip];
+                if (alarmField) {
+                    label = $translate.instant(alarmField.name)+'';
+                }
+            }
+            label = scope.genNextLabel(label);
+
             var result = {
                 name: chip,
                 type: type,
-                label: scope.genNextLabel(chip),
+                label: label,
                 color: scope.genNextColor(),
                 settings: {},
                 _hash: Math.random()
@@ -328,15 +398,18 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
             var matches = false;
             do {
                 matches = false;
-                if (value.datasources) {
-                    for (var d in value.datasources) {
-                        var datasource = value.datasources[d];
-                        for (var k in datasource.dataKeys) {
-                            var dataKey = datasource.dataKeys[k];
-                            if (dataKey.label === label) {
-                                i++;
-                                label = name + ' ' + i;
-                                matches = true;
+                var datasources = scope.widgetType == types.widgetType.alarm.value ? [value.config.alarmSource] : value.config.datasources;
+                if (datasources) {
+                    for (var d=0;d<datasources.length;d++) {
+                        var datasource = datasources[d];
+                        if (datasource && datasource.dataKeys) {
+                            for (var k = 0; k < datasource.dataKeys.length; k++) {
+                                var dataKey = datasource.dataKeys[k];
+                                if (dataKey.label === label) {
+                                    i++;
+                                    label = name + ' ' + i;
+                                    matches = true;
+                                }
                             }
                         }
                     }
@@ -348,10 +421,13 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
         scope.genNextColor = function () {
             var i = 0;
             var value = ngModelCtrl.$viewValue;
-            if (value.datasources) {
-                for (var d in value.datasources) {
-                    var datasource = value.datasources[d];
-                    i += datasource.dataKeys.length;
+            var datasources = scope.widgetType == types.widgetType.alarm.value ? [value.config.alarmSource] : value.config.datasources;
+            if (datasources) {
+                for (var d=0;d<datasources.length;d++) {
+                    var datasource = datasources[d];
+                    if (datasource && datasource.dataKeys) {
+                        i += datasource.dataKeys.length;
+                    }
                 }
             }
             return utils.getMaterialColor(i);
@@ -366,12 +442,13 @@ function WidgetConfig($compile, $templateCache, $rootScope, $timeout, types, uti
             forceExpandDatasources: '=?',
             isDataEnabled: '=?',
             widgetType: '=',
+            typeParameters: '=',
             widgetSettingsSchema: '=',
             datakeySettingsSchema: '=',
-            deviceAliases: '=',
+            aliasController: '=',
             functionsOnly: '=',
-            fetchDeviceKeys: '&',
-            onCreateDeviceAlias: '&',
+            fetchEntityKeys: '&',
+            onCreateEntityAlias: '&',
             theForm: '='
         },
         link: linker

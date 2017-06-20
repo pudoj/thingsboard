@@ -17,9 +17,13 @@ package org.thingsboard.server.dao.dashboard;
 
 import static org.thingsboard.server.dao.DaoUtil.convertDataList;
 import static org.thingsboard.server.dao.DaoUtil.getData;
+import static org.thingsboard.server.dao.service.Validator.validateId;
 
 import java.util.List;
 
+import com.google.common.base.Function;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.thingsboard.server.common.data.Dashboard;
@@ -30,20 +34,19 @@ import org.thingsboard.server.common.data.id.TenantId;
 import org.thingsboard.server.common.data.page.TextPageData;
 import org.thingsboard.server.common.data.page.TextPageLink;
 import org.thingsboard.server.dao.customer.CustomerDao;
+import org.thingsboard.server.dao.entity.AbstractEntityService;
 import org.thingsboard.server.dao.exception.DataValidationException;
 import org.thingsboard.server.dao.model.*;
 import org.thingsboard.server.dao.service.DataValidator;
 import org.thingsboard.server.dao.service.PaginatedRemover;
 import org.thingsboard.server.dao.tenant.TenantDao;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.thingsboard.server.dao.service.Validator;
 
 @Service
 @Slf4j
-public class DashboardServiceImpl implements DashboardService {
+public class DashboardServiceImpl extends AbstractEntityService implements DashboardService {
 
     @Autowired
     private DashboardDao dashboardDao;
@@ -63,6 +66,30 @@ public class DashboardServiceImpl implements DashboardService {
         Validator.validateId(dashboardId, "Incorrect dashboardId " + dashboardId);
         DashboardEntity dashboardEntity = dashboardDao.findById(dashboardId.getId());
         return getData(dashboardEntity);
+    }
+
+    @Override
+    public ListenableFuture<Dashboard> findDashboardByIdAsync(DashboardId dashboardId) {
+        log.trace("Executing findDashboardByIdAsync [{}]", dashboardId);
+        validateId(dashboardId, "Incorrect dashboardId " + dashboardId);
+        ListenableFuture<DashboardEntity> dashboardEntity = dashboardDao.findByIdAsync(dashboardId.getId());
+        return Futures.transform(dashboardEntity, (Function<? super DashboardEntity, ? extends Dashboard>) input -> getData(input));
+    }
+
+    @Override
+    public DashboardInfo findDashboardInfoById(DashboardId dashboardId) {
+        log.trace("Executing findDashboardInfoById [{}]", dashboardId);
+        Validator.validateId(dashboardId, "Incorrect dashboardId " + dashboardId);
+        DashboardInfoEntity dashboardInfoEntity = dashboardInfoDao.findById(dashboardId.getId());
+        return getData(dashboardInfoEntity);
+    }
+
+    @Override
+    public ListenableFuture<DashboardInfo> findDashboardInfoByIdAsync(DashboardId dashboardId) {
+        log.trace("Executing findDashboardInfoByIdAsync [{}]", dashboardId);
+        validateId(dashboardId, "Incorrect dashboardId " + dashboardId);
+        ListenableFuture<DashboardInfoEntity> dashboardInfoEntity = dashboardInfoDao.findByIdAsync(dashboardId.getId());
+        return Futures.transform(dashboardInfoEntity, (Function<? super DashboardInfoEntity, ? extends DashboardInfo>) input -> getData(input));
     }
 
     @Override
@@ -91,6 +118,7 @@ public class DashboardServiceImpl implements DashboardService {
     public void deleteDashboard(DashboardId dashboardId) {
         log.trace("Executing deleteDashboard [{}]", dashboardId);
         Validator.validateId(dashboardId, "Incorrect dashboardId " + dashboardId);
+        deleteEntityRelations(dashboardId);
         dashboardDao.removeById(dashboardId.getId());
     }
 
