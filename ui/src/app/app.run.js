@@ -36,7 +36,7 @@ export default function AppRun($rootScope, $window, $injector, $location, $log, 
     }
 
     initWatchers();
-    
+
     function initWatchers() {
         $rootScope.unauthenticatedHandle = $rootScope.$on('unauthenticated', function (event, doLogout) {
             if (doLogout) {
@@ -124,7 +124,7 @@ export default function AppRun($rootScope, $window, $injector, $location, $log, 
             }
         })
 
-        $rootScope.pageTitle = 'Thingsboard';
+        $rootScope.pageTitle = '工业物联网云平台';//JUNE
 
         $rootScope.stateChangeSuccessHandle = $rootScope.$on('$stateChangeSuccess', function (evt, to, params) {
             if (userService.isPublic() && to.name === 'home.dashboards.dashboard') {
@@ -133,9 +133,9 @@ export default function AppRun($rootScope, $window, $injector, $location, $log, 
             }
             if (angular.isDefined(to.data.pageTitle)) {
                 $translate(to.data.pageTitle).then(function (translation) {
-                    $rootScope.pageTitle = 'Thingsboard | ' + translation;
+                    $rootScope.pageTitle = '工业物联网云平台 | ' + translation;//JUNE
                 }, function (translationId) {
-                    $rootScope.pageTitle = 'Thingsboard | ' + translationId;
+                    $rootScope.pageTitle = '工业物联网云平台 | ' + translationId;//JUNE
                 });
             }
         })

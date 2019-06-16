@@ -187,13 +187,13 @@ function Menu(userService, $state, $rootScope) {
                             type: 'link',
                             state: 'home.customers',
                             icon: 'supervisor_account'
-                        },
+                        },//*
                         {
                             name: 'asset.assets',
                             type: 'link',
                             state: 'home.assets',
                             icon: 'domain'
-                        },
+                        },//*/
                         {
                             name: 'device.devices',
                             type: 'link',
@@ -238,7 +238,7 @@ function Menu(userService, $state, $rootScope) {
                                     state: 'home.customers'
                                 }
                             ]
-                        },
+                        },//*
                             {
                                 name: 'asset.management',
                                 places: [
@@ -248,7 +248,7 @@ function Menu(userService, $state, $rootScope) {
                                         state: 'home.assets'
                                     }
                                 ]
-                            },
+                            },//*/
                             {
                                 name: 'device.management',
                                 places: [

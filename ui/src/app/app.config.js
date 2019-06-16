@@ -47,7 +47,8 @@ export default function AppConfig($provide,
     storeProvider.setCaching(false);
 
     $translateProvider.useSanitizeValueStrategy('sce');
-    $translateProvider.preferredLanguage('en_US');
+    //$translateProvider.preferredLanguage('en_US');
+    $translateProvider.preferredLanguage('zh_CN');//JUNE
     $translateProvider.useLocalStorage();
     $translateProvider.useMissingTranslationHandler('tbMissingTranslationHandler');
     $translateProvider.addInterpolation('$translateMessageFormatInterpolation');
